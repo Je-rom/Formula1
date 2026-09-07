@@ -1,6 +1,10 @@
 using GitFormula_1.Data;
 using GitFormula_1.Interfaces.Providers;
+using GitFormula_1.Interfaces.Repository;
+using GitFormula_1.Interfaces.Services;
 using GitFormula_1.Providers;
+using GitFormula_1.Repositories;
+using GitFormula_1.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,6 +12,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 
 builder.Services.AddControllers();
+// builder.Services.AddControllers()
+//     .AddJsonOptions(options =>
+//     {
+//         options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+//     });
 builder.Services.AddOpenApi();
 
 builder.Services.AddHttpClient("GitHub", client =>
@@ -24,8 +33,19 @@ builder.Services.AddDbContext<GitFormula1DbContext>(opt =>
 });
 
 builder.Services.AddScoped<IGitHubApiProvider, GitHubApiProvider>();
+builder.Services.AddScoped<IProfileRepository, ProfileRepository>();
+builder.Services.AddScoped<IProfileService, ProfileService>();
+builder.Services.AddScoped<IScoringService, ScoringService>();
+builder.Services.AddScoped<IBadgeRepository, BadgeRepository>();
+builder.Services.AddScoped<IBadgeService, BadgeService>();
+builder.Services.AddScoped<IDuelService, DuelService>();
 
 var app = builder.Build();
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<GitFormula1DbContext>();
+    await GitFormula_1.Seeder.BadgeSeeder.SeedAsync(context);
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

@@ -6,5 +6,6 @@ namespace GitFormula_1.Interfaces.Providers
     {
         Task<GitHubUserData?> GetUserProfileAsync(string username);
         Task<GitHubContributionData> GetContributionDataAsync(string username);
+        Task<GitHubRepositoryStats> GetGitHubRepositoryStatsAsync(string username);
     }
 }

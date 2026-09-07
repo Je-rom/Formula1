@@ -12,7 +12,7 @@ namespace GitFormula_1.Providers
 
         public GitHubApiProvider(IHttpClientFactory httpClientFactory, IConfiguration configuration)
         {
-            _httpClient = httpClientFactory.CreateClient("GitHubClient");
+            _httpClient = httpClientFactory.CreateClient("GitHub");
             _token = configuration["GitHub:Token"]
                 ?? throw new InvalidOperationException("GitHub token not configured");
 
@@ -108,6 +108,103 @@ namespace GitFormula_1.Providers
                 TotalPullRequestReviewContributions = collection.GetProperty("totalPullRequestReviewContributions").GetInt32(),
                 TotalIssueContributions = collection.GetProperty("totalIssueContributions").GetInt32(),
                 Calendar = days
+            };
+        }
+
+        public async Task<GitHubRepositoryStats> GetGitHubRepositoryStatsAsync(string username)
+        {
+            const string query = @"
+    query($username: String!) {
+        user(login: $username) {
+            pullRequests(states: MERGED) {
+                totalCount
+            }
+            issues(states: CLOSED) {
+                totalCount
+            }
+            issueComments {
+                totalCount
+            }
+       repositories(first: 100, ownerAffiliations: OWNER, isFork: false, orderBy: {field: STARGAZERS, direction: DESC}) {
+                nodes {
+                    stargazerCount
+                    languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
+                        edges {
+                            size
+                            node {
+                                name
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }";
+            var requestBody = new
+            {
+                query,
+                variables = new { username }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.github.com/graphql")
+            {
+                Content = JsonContent.Create(requestBody)
+            };
+
+            var response = await _httpClient.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync();
+            var doc = JsonSerializer.Deserialize<JsonElement>(json);
+
+            if (doc.TryGetProperty("errors", out var errors))
+            {
+                throw new InvalidOperationException($"GitHub GraphQL error: {errors}");
+            }
+
+            var user = doc.GetProperty("data").GetProperty("user");
+
+            var mergedPrs = user.GetProperty("pullRequests").GetProperty("totalCount").GetInt32();
+            var issuesClosed = user.GetProperty("issues").GetProperty("totalCount").GetInt32();
+            var commentsMade = user.GetProperty("issueComments").GetProperty("totalCount").GetInt32();
+
+            var repos = user.GetProperty("repositories").GetProperty("nodes");
+
+            int starsEarned = 0;
+            int topRepoStars = 0;
+            var languageSizes = new Dictionary<string, long>();
+
+            foreach (var repo in repos.EnumerateArray())
+            {
+                var stars = repo.GetProperty("stargazerCount").GetInt32();
+                starsEarned += stars;
+                if (stars > topRepoStars)
+                    topRepoStars = stars;
+
+                foreach (var edge in repo.GetProperty("languages").GetProperty("edges").EnumerateArray())
+                {
+                    var langName = edge.GetProperty("node").GetProperty("name").GetString()!;
+                    var size = edge.GetProperty("size").GetInt64();
+
+                    languageSizes[langName] = languageSizes.GetValueOrDefault(langName, 0) + size;
+                }
+            }
+
+            long totalSize = languageSizes.Values.Sum();
+            var languageBreakdown = totalSize > 0
+                ? languageSizes.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => Math.Round((double)kvp.Value / totalSize * 100, 1))
+                : new Dictionary<string, double>();
+
+            return new GitHubRepositoryStats
+            {
+                MergedPullRequests = mergedPrs,
+                IssuesClosed = issuesClosed,
+                StarsEarned = starsEarned,
+                TopRepoStars = topRepoStars,
+                CommentsMade = commentsMade,
+                LanguageBreakdown = languageBreakdown
             };
         }
     }
